@@ -1,0 +1,25 @@
+{
+  "persons": [
+      {
+        "email": "karl.valliste@gmail.com",
+        "name": "Karl Valliste",
+        "elim": [],
+        "preferences": "",
+        "comment": ""
+      },
+      {
+        "email": "karl@estokute.ee",
+        "name": "Eleri Valliste",
+        "elim": ["Karl Valliste"],
+        "preferences": "",
+        "comment": ""
+      },
+    {
+      "email": "karl.valliste@lab.mobi",
+      "name": "Hannela Valliste",
+      "elim": [],
+      "preferences": "Viskan tagurit",
+      "comment": ""
+    }
+    ]
+}

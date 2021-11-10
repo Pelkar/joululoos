@@ -1,62 +1,41 @@
+import java.util.*
+import javax.mail.*
 import java.io.File
 import java.io.InputStream
-import java.util.*
-import org.apache.commons.mail.DefaultAuthenticator
-import org.apache.commons.mail.HtmlEmail
+import java.lang.Exception
+import com.google.gson.Gson
+import java.io.FileInputStream
 import java.time.LocalDateTime
+import javax.mail.internet.MimeMessage
+import javax.mail.internet.InternetAddress
 
-val contactsMap : MutableMap<String, String> = mutableMapOf<String, String>()
-
-fun main(args : Array<String>) {
-    val peopleList : List<Person> = assignRandom(readFromFile())
+fun main() {
+    val peopleList : List<AssignedPerson> = assignRandom(readFromFile())
     writeResults(peopleList)
-    sendEmails(peopleList)
+    prepareEmailContent(peopleList)
 }
 
-fun writeResults(peopleList: List<Person>) {
-    val time = LocalDateTime.now()
-    File("results$time.txt").bufferedWriter().use { out ->
-        peopleList.forEach {
-            out.write("${it.name} -> ${it.recipient}\n")
-        }
-    }
-}
-
-fun sendEmails(peopleList: List<Person>) {
-    val senderEmail = "joululoos@online.ee"
-    var toMail : String
-    val password = "Eleri1992"
-    var html : String
-
-    for (person : Person in peopleList) {
-        html = readHtml()
-        toMail = contactsMap.get(person.name)!!
-        println(contactsMap.get(person.name) + " -> " + person.recipient)
-        val email = HtmlEmail()
-        email.hostName = "mail.hot.ee"
-        email.setSmtpPort(465)
-        email.setAuthenticator(DefaultAuthenticator(senderEmail, password))
-        email.isSSLOnConnect = true
-        email.setFrom(senderEmail)
-        email.addTo(toMail)
-        email.subject = "Jõululoos"
-        html = html.replace(oldValue = "-NAME-", newValue = person.name.split(" ".toRegex())[0], ignoreCase = false)
-        html = html.replace(oldValue = "-RECIPIENT-", newValue = person.recipient!!, ignoreCase = false)
-        email.setHtmlMsg(html)
-        email.send()
-    }
-}
-
-fun assignRandom(peopleList : List<Person>) : List<Person> {
+fun assignRandom(peopleList : List<Person>) : List<AssignedPerson> {
     val remaining : MutableList<Person> = peopleList.toMutableList().asReversed()
     val random = Random()
     var index : Int
-    for (i in 0 until peopleList.size) {
+    val newList = mutableListOf<AssignedPerson>()
+    for (i in peopleList.indices) {
         var turn = 5
         while (true) {
             index = random.nextInt(remaining.size)
-            if (!peopleList[i].elim.contains(remaining[index].name) && peopleList[i].name != remaining[index].name) {
-                peopleList[i].recipient = remaining[index].name
+            val from = peopleList[i]
+            val to = remaining[index]
+            if (!from.elim.contains(to.name) && from.name != to.name) {
+                newList.add(
+                        AssignedPerson(
+                                giverName = from.name,
+                                giverEmail = from.email,
+                                receiverName = to.name,
+                                receiverPreferences = to.preferences,
+                                receiverComment = to.comment
+                        )
+                )
                 remaining.removeAt(index)
                 break
             }
@@ -67,31 +46,97 @@ fun assignRandom(peopleList : List<Person>) : List<Person> {
             turn -= 1
         }
     }
-    return peopleList
+    return newList
 }
 
 fun readFromFile() : List<Person> {
-    val peopleList = mutableListOf<Person>()
+    val peopleData = getJsonDataFromFile()
+    val peopleList = Gson().fromJson(peopleData, PersonList::class.java)
+    return peopleList.persons
+}
 
-    val inputstream : InputStream = File("people.txt").inputStream()
-    inputstream.bufferedReader().useLines { lines -> lines.forEach {
-        val arr = it.split(";")
-        val eliminations : List<String>?
-        if (arr.size > 2) {
-            eliminations = arr.subList(2, arr.size)
-        } else {
-            eliminations = emptyList()
+fun writeResults(peopleList: List<AssignedPerson>) {
+    val time = LocalDateTime.now()
+    File("results$time.txt").bufferedWriter().use { out ->
+        peopleList.forEach {
+            out.write("${it.giverName} -> ${it.receiverName}\n")
         }
-        contactsMap.put(arr[0], arr[1])
-        peopleList.add(Person(name = arr[0], elim = eliminations, recipient = null))
-    } }
-    return peopleList
+    }
 }
 
-fun readHtml() : String {
-    val inputstream : InputStream = File("email.html").inputStream()
-    val html = inputstream.bufferedReader().readText()
-    return html
+fun prepareEmailContent(peopleList: List<AssignedPerson>) {
+    var html : String
+    for (person : AssignedPerson in peopleList) {
+        html = readHtml()
+        println(person.giverName + " -> " + person.receiverName)
+        html = html.replace(oldValue = "-NAME-", newValue = person.giverName.split(" ".toRegex())[0], ignoreCase = false)
+        html = html.replace(oldValue = "-RECIPIENT-", newValue = person.receiverName, ignoreCase = false)
+        val prefs = person.receiverPreferences.split(",").joinToString(separator = "<br>")
+        html = html.replace(oldValue = "-PREFERENCES-", newValue = prefs, ignoreCase = false)
+        html = html.replace(oldValue = "-COMMENT-", newValue = person.receiverComment, ignoreCase = false)
+        if (person.giverEmail == "karl.valliste@gmail.com") {
+            sendEmail(html, person.giverEmail)
+        }
+    }
+    println("Done")
 }
 
-data class Person(val name: String, val elim : List<String>, var recipient : String?)
+fun sendEmail(html: String, recipient: String) {
+    try {
+        val conf = Properties()
+        conf.load(FileInputStream("conf.properties"))
+        val username = conf.getProperty("loos.email")
+        val password = conf.getProperty("loos.pw")
+        val prop = Properties()
+        prop["mail.smtp.host"] = "smtp.gmail.com"
+        prop["mail.smtp.port"] = "587"
+        prop["mail.smtp.auth"] = "true"
+        prop["mail.smtp.ssl.trust"] = "smtp.gmail.com"
+        prop["mail.smtp.starttls.enable"] = "true"
+        prop["mail.smtp.ssl.protocols"] = "TLSv1.2"
+        prop["mail.smtp.socketFactory.class"] = "javax.net.ssl.SSLSocketFactory"
+        val session = Session.getInstance(prop,
+                object : Authenticator() {
+                    override fun getPasswordAuthentication(): PasswordAuthentication {
+                        return PasswordAuthentication(username, password)
+                    }
+                })
+        try {
+            val message: Message = MimeMessage(session)
+            message.setFrom(InternetAddress("olenpakapikk@gmail.com"))
+            message.setRecipients(
+                Message.RecipientType.TO,
+                InternetAddress.parse(recipient)
+            )
+            message.subject = "Jõululoos"
+            message.setContent(html, "text/html")
+            Transport.send(message)
+        } catch (e: MessagingException) {
+            println("FAILED - to $recipient")
+            e.printStackTrace()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun readHtml(): String {
+    val inputStream: InputStream = File("bb.html").inputStream()
+    return inputStream.bufferedReader().readText()
+}
+
+fun getJsonDataFromFile(): String? {
+    val jsonString: String
+    try {
+        val inputStream = File("bb.json").inputStream()
+        jsonString = inputStream.bufferedReader().readText()
+    } catch (exception: Exception) {
+        exception.printStackTrace()
+        return null
+    }
+    return jsonString
+}
+
+data class PersonList(val persons: List<Person>)
+data class Person(val email: String, val name: String, val elim: List<String>, var preferences: String = "", var comment: String = "")
+data class AssignedPerson(val giverName: String, val receiverName: String, var giverEmail: String = "", var receiverPreferences: String = "", var receiverComment: String = "")
